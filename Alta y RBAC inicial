@@ -1,6 +1,18 @@
+$TenantId     = "c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d"
+$ClientId     = "d7e15bad-17f4-4c13-bf3d-b0014d34e044"
+$ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
+
+$SecureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+$Credential   = New-Object System.Management.Automation.PSCredential($ClientId, $SecureSecret)
+
+Connect-MgGraph `
+    -TenantId $TenantId `
+    -ClientSecretCredential $Credential
+
+Connect-MgGraph -ClientId d7e15bad-17f4-4c13-bf3d-b0014d34e044 -TenantId c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d -CertificateThumbprint 61268C96BB7F10A02B158D0611442308E0022795
+
 $CsvPath = "C:\temp\NX\Desafio.csv"
 $Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
-
 
 $Empleados = Import-Csv $CsvPath
 
