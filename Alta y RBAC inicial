@@ -1,0 +1,71 @@
+$CsvPath = "C:\temp\NX\Desafio.csv"
+$Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
+
+
+$Empleados = Import-Csv $CsvPath
+
+foreach ($emp in $Empleados) {
+
+    $DisplayName = "$($emp.Nombre) $($emp.Apellido)"
+    $UPN = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower() + "@$Domain"
+    $MailNick = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower()
+
+    Write-Host "Procesando: $DisplayName"
+
+    #Verificar si el usuario ya existe
+    $User = Get-MgUser -Filter "userPrincipalName eq '$UPN'" -ErrorAction SilentlyContinue
+
+    if (-not $User) {
+
+        Write-Host "Creando usuario"
+
+        $UserBody = @{
+            accountEnabled    = $true
+            displayName       = $DisplayName
+            userPrincipalName = $UPN
+            mailNickname      = $MailNick
+            givenName         = $emp.Nombre
+            surname           = $emp.Apellido
+            department        = $emp.Departamento
+            jobTitle          = $emp.Puesto
+            passwordProfile   = @{
+                password = "TempP@ssw0rd123!"
+                forceChangePasswordNextSignIn = $true
+            }
+        }
+
+        $User = New-MgUser -BodyParameter $UserBody
+    }
+    else {
+        Write-Host "El usuario ya existe"
+    }
+
+    #Grupo por Rol
+    $GroupName = "Rol-$($emp.Puesto)"
+
+    $Group = Get-MgGroup -Filter "displayName eq '$GroupName'" -ErrorAction SilentlyContinue
+
+    if (-not $Group) {
+
+        Write-Host "Creando grupo $GroupName"
+
+        $Group = New-MgGroup `
+            -DisplayName $GroupName `
+            -MailEnabled:$false `
+            -SecurityEnabled:$true `
+            -MailNickname ($GroupName -replace ' ', '')
+
+        Start-Sleep -Seconds 5
+    }
+    else {
+        Write-Host "El grupo ya existe"
+    }
+
+    #Asignar usuario al grupo
+    Write-Host "Asignando usuario al grupo"
+    New-MgGroupMember `
+        -GroupId $Group.Id `
+        -DirectoryObjectId $User.Id
+}
+
+Write-Host "Usuario creado con éxito"
