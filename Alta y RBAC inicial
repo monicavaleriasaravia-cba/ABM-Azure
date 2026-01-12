@@ -9,8 +9,6 @@ Connect-MgGraph `
     -TenantId $TenantId `
     -ClientSecretCredential $Credential
 
-Connect-MgGraph -ClientId d7e15bad-17f4-4c13-bf3d-b0014d34e044 -TenantId c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d -CertificateThumbprint 61268C96BB7F10A02B158D0611442308E0022795
-
 $CsvPath = "C:\temp\NX\Desafio.csv"
 $Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
 
@@ -22,10 +20,12 @@ foreach ($emp in $Empleados) {
     $UPN = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower() + "@$Domain"
     $MailNick = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower()
 
-    Write-Host "Procesando: $DisplayName"
+    Write-Host "`nProcesando: $DisplayName"
 
-    #Verificar si el usuario ya existe
-    $User = Get-MgUser -Filter "userPrincipalName eq '$UPN'" -ErrorAction SilentlyContinue
+    # ========================
+    # USUARIO
+    # ========================
+    $User = Get-MgUser -Filter "userPrincipalName eq '$UPN'" -ErrorAction SilentlyContinue | Select-Object -First 1
 
     if (-not $User) {
 
@@ -52,10 +52,15 @@ foreach ($emp in $Empleados) {
         Write-Host "El usuario ya existe"
     }
 
-    #Grupo por Rol
+    # ========================
+    # GRUPO
+    # ========================
     $GroupName = "Rol-$($emp.Puesto)"
 
-    $Group = Get-MgGroup -Filter "displayName eq '$GroupName'" -ErrorAction SilentlyContinue
+    $Group = Get-MgGroup `
+        -Filter "displayName eq '$GroupName'" `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
 
     if (-not $Group) {
 
@@ -73,11 +78,27 @@ foreach ($emp in $Empleados) {
         Write-Host "El grupo ya existe"
     }
 
-    #Asignar usuario al grupo
+    # ========================
+    # ASIGNACIÓN
+    # ========================
     Write-Host "Asignando usuario al grupo"
-    New-MgGroupMember `
-        -GroupId $Group.Id `
-        -DirectoryObjectId $User.Id
+
+    try {
+        New-MgGroupMember `
+          -GroupId $Group.Id `
+          -DirectoryObjectId $User.Id `
+          -ErrorAction Stop
+
+        Write-Host "Usuario agregado al grupo"
+    }
+    catch {
+        if ($_.Exception.Message -match "already exist") {
+            Write-Host "El usuario ya pertenece al grupo"
+        }
+        else {
+            throw
+        }
+    }
 }
 
-Write-Host "Usuario creado con éxito"
+Write-Host "Proceso finalizado correctamente"
