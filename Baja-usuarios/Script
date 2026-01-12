@@ -8,7 +8,7 @@ $ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
 $DominioUPN   = "monicavaleriasaraviagmail.onmicrosoft.com"
 
 $CsvPath = "C:\temp\NX\Desafio.csv"
-$LogPath = "C:\temp\NX\bajas.log"
+$LogPath = "C:\temp\NX\logbajas.log"
 
 # ----------------------------------------------------------
 
