@@ -1,3 +1,6 @@
+# ========================
+# CONEXIÓN
+# ========================
 $TenantId     = "c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d"
 $ClientId     = "d7e15bad-17f4-4c13-bf3d-b0014d34e044"
 $ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
@@ -9,11 +12,17 @@ Connect-MgGraph `
     -TenantId $TenantId `
     -ClientSecretCredential $Credential
 
+# ========================
+# CONFIGURACIÓN
+# ========================
 $CsvPath = "C:\temp\NX\Desafio.csv"
 $Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
 
 $Empleados = Import-Csv $CsvPath
 
+# ========================
+# PROCESO
+# ========================
 foreach ($emp in $Empleados) {
 
     $DisplayName = "$($emp.Nombre) $($emp.Apellido)"
@@ -25,11 +34,14 @@ foreach ($emp in $Empleados) {
     # ========================
     # USUARIO
     # ========================
-    $User = Get-MgUser -Filter "userPrincipalName eq '$UPN'" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $User = Get-MgUser `
+        -Filter "userPrincipalName eq '$UPN'" `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
 
     if (-not $User) {
 
-        Write-Host "Creando usuario"
+        Write-Host "Creando usuario $UPN"
 
         $UserBody = @{
             accountEnabled    = $true
@@ -55,7 +67,9 @@ foreach ($emp in $Empleados) {
     # ========================
     # GRUPO
     # ========================
-    $GroupName = "Rol-$($emp.Puesto)"
+    $RolNormalizado = $emp.Puesto `
+
+    $GroupName = "Rol-$RolNormalizado"
 
     $Group = Get-MgGroup `
         -Filter "displayName eq '$GroupName'" `
@@ -66,11 +80,21 @@ foreach ($emp in $Empleados) {
 
         Write-Host "Creando grupo $GroupName"
 
+        $MailNicknameGroup = (($GroupName -replace ' ', '') `
+            -replace 'ñ','n' `
+            -replace 'Ñ','N' `
+            -replace '�','n' `
+            -replace 'á','a' `
+            -replace 'é','e' `
+            -replace 'í','i' `
+            -replace 'ó','o' `
+            -replace 'ú','u' )
+
         $Group = New-MgGroup `
             -DisplayName $GroupName `
             -MailEnabled:$false `
             -SecurityEnabled:$true `
-            -MailNickname ($GroupName -replace ' ', '')
+            -MailNickname $MailNicknameGroup
 
         Start-Sleep -Seconds 5
     }
@@ -81,13 +105,13 @@ foreach ($emp in $Empleados) {
     # ========================
     # ASIGNACIÓN
     # ========================
-    Write-Host "Asignando usuario al grupo"
+    Write-Host "Asignando usuario al grupo $GroupName"
 
     try {
         New-MgGroupMember `
-          -GroupId $Group.Id `
-          -DirectoryObjectId $User.Id `
-          -ErrorAction Stop
+            -GroupId $Group.Id `
+            -DirectoryObjectId $User.Id `
+            -ErrorAction Stop
 
         Write-Host "Usuario agregado al grupo"
     }
@@ -102,3 +126,4 @@ foreach ($emp in $Empleados) {
 }
 
 Write-Host "Proceso finalizado correctamente"
+
