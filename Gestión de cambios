@@ -1,0 +1,99 @@
+$TenantId     = "c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d"
+$ClientId     = "d7e15bad-17f4-4c13-bf3d-b0014d34e044"
+$ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
+
+$SecureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+$Credential   = New-Object System.Management.Automation.PSCredential($ClientId, $SecureSecret)
+
+Connect-MgGraph `
+    -TenantId $TenantId `
+    -ClientSecretCredential $Credential
+
+Connect-MgGraph -ClientId d7e15bad-17f4-4c13-bf3d-b0014d34e044 -TenantId c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d -CertificateThumbprint 61268C96BB7F10A02B158D0611442308E0022795
+
+$CsvPath = "C:\temp\NX\Desafio.csv"
+$Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
+
+$Empleados = Import-Csv $CsvPath
+
+foreach ($emp in $Empleados) {
+
+    $DisplayName = "$($emp.Nombre) $($emp.Apellido)"
+    $UPN = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower() + "@$Domain"
+    $NuevoPuesto = $emp.Puesto
+
+    Write-Host "Procesando cambios para $DisplayName"
+
+    # Obtener usuario actual
+    $User = Get-MgUser -Filter "userPrincipalName eq '$UPN'" -Property Id,JobTitle
+
+    if (-not $User) {
+        Write-Host "⚠ Usuario no encontrado, se omite"
+        continue
+    }
+
+    $PuestoActual = $User.JobTitle
+
+    #Detectar cambio de puesto
+    if ($PuestoActual -ne $NuevoPuesto) {
+
+        Write-Host "Cambio detectado:"
+        Write-Host "   Antes : $PuestoActual"
+        Write-Host "   Ahora : $NuevoPuesto"
+
+        #Actualizar JobTitle
+        Update-MgUser `
+            -UserId $User.Id `
+            -JobTitle $NuevoPuesto
+
+        #Quitar del grupo anterior
+        if ($PuestoActual) {
+
+            $GrupoAnteriorNombre = "Rol-$PuestoActual"
+
+            $GrupoAnterior = Get-MgGroup `
+                -Filter "displayName eq '$GrupoAnteriorNombre'" `
+                -ErrorAction SilentlyContinue
+
+            if ($GrupoAnterior) {
+                Write-Host "Quitando del grupo $GrupoAnteriorNombre"
+
+                Remove-MgGroupMemberByRef `
+                    -GroupId $GrupoAnterior.Id `
+                    -DirectoryObjectId $User.Id `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+
+        #Crear / buscar nuevo grupo
+        $GrupoNuevoNombre = "Rol-$NuevoPuesto"
+
+        $GrupoNuevo = Get-MgGroup `
+            -Filter "displayName eq '$GrupoNuevoNombre'" `
+            -ErrorAction SilentlyContinue
+
+        if (-not $GrupoNuevo) {
+            Write-Host "Creando grupo $GrupoNuevoNombre"
+
+            $GrupoNuevo = New-MgGroup `
+                -DisplayName $GrupoNuevoNombre `
+                -MailEnabled:$false `
+                -SecurityEnabled:$true `
+                -MailNickname ($GrupoNuevoNombre -replace ' ', '')
+
+            Start-Sleep -Seconds 5
+        }
+
+        #Agregar al nuevo grupo
+        Write-Host "Asignando a $GrupoNuevoNombre"
+
+        New-MgGroupMember `
+            -GroupId $GrupoNuevo.Id `
+            -DirectoryObjectId $User.Id
+    }
+    else {
+        Write-Host "Sin cambios de puesto"
+    }
+}
+
+Write-Host "Gestión de cambios finalizada"
