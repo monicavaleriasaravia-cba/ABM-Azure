@@ -1,0 +1,128 @@
+# ========================
+# CONEXIÓN
+# ========================
+$TenantId     = "c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d"
+$ClientId     = "d7e15bad-17f4-4c13-bf3d-b0014d34e044"
+$ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
+
+$SecureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+$Credential   = New-Object System.Management.Automation.PSCredential($ClientId, $SecureSecret)
+
+Connect-MgGraph `
+    -TenantId $TenantId `
+    -ClientSecretCredential $Credential
+
+# ========================
+# CONFIGURACIÓN
+# ========================
+$CsvPath = "C:\temp\NX\Desafio.csv"
+$Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
+
+$Empleados = Import-Csv $CsvPath
+
+# ========================
+# PROCESO
+# ========================
+foreach ($emp in $Empleados) {
+
+    $DisplayName = "$($emp.Nombre) $($emp.Apellido)"
+    $UPN = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower() + "@$Domain"
+    $MailNick = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower()
+
+    Write-Host "`nProcesando: $DisplayName"
+
+    # ========================
+    # USUARIO
+    # ========================
+    $User = Get-MgUser `
+        -Filter "userPrincipalName eq '$UPN'" `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if (-not $User) {
+
+        Write-Host "Creando usuario $UPN"
+
+        $UserBody = @{
+            accountEnabled    = $true
+            displayName       = $DisplayName
+            userPrincipalName = $UPN
+            mailNickname      = $MailNick
+            givenName         = $emp.Nombre
+            surname           = $emp.Apellido
+            department        = $emp.Departamento
+            jobTitle          = $emp.Puesto
+            passwordProfile   = @{
+                password = "TempP@ssw0rd123!"
+                forceChangePasswordNextSignIn = $true
+            }
+        }
+
+        $User = New-MgUser -BodyParameter $UserBody
+    }
+    else {
+        Write-Host "El usuario ya existe"
+    }
+
+    # ========================
+    # GRUPO
+    # ========================
+    $RolNormalizado = $emp.Puesto `
+
+    $GroupName = "Rol-$RolNormalizado"
+
+    $Group = Get-MgGroup `
+        -Filter "displayName eq '$GroupName'" `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if (-not $Group) {
+
+        Write-Host "Creando grupo $GroupName"
+
+        $MailNicknameGroup = (($GroupName -replace ' ', '') `
+            -replace 'ñ','n' `
+            -replace 'Ñ','N' `
+            -replace '�','n' `
+            -replace 'á','a' `
+            -replace 'é','e' `
+            -replace 'í','i' `
+            -replace 'ó','o' `
+            -replace 'ú','u' )
+
+        $Group = New-MgGroup `
+            -DisplayName $GroupName `
+            -MailEnabled:$false `
+            -SecurityEnabled:$true `
+            -MailNickname $MailNicknameGroup
+
+        Start-Sleep -Seconds 5
+    }
+    else {
+        Write-Host "El grupo ya existe"
+    }
+
+    # ========================
+    # ASIGNACIÓN
+    # ========================
+    Write-Host "Asignando usuario al grupo $GroupName"
+
+    try {
+        New-MgGroupMember `
+            -GroupId $Group.Id `
+            -DirectoryObjectId $User.Id `
+            -ErrorAction Stop
+
+        Write-Host "Usuario agregado al grupo"
+    }
+    catch {
+        if ($_.Exception.Message -match "already exist") {
+            Write-Host "El usuario ya pertenece al grupo"
+        }
+        else {
+            throw
+        }
+    }
+}
+
+Write-Host "Proceso finalizado correctamente"
