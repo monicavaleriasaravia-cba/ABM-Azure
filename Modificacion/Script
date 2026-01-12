@@ -1,0 +1,154 @@
+# ==============================
+# CONFIGURACIÓN
+# ==============================
+
+$TenantId     = "c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d"
+$ClientId     = "d7e15bad-17f4-4c13-bf3d-b0014d34e044"
+$ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
+
+$CsvPath = "C:\temp\NX\Desafio.csv"
+$Domain  = "monicavaleriasaraviagmail.onmicrosoft.com"
+
+# ==============================
+# CONEXIÓN A MICROSOFT GRAPH
+# ==============================
+
+$SecureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+$Credential   = New-Object System.Management.Automation.PSCredential($ClientId, $SecureSecret)
+
+Connect-MgGraph `
+    -TenantId $TenantId `
+    -ClientSecretCredential $Credential
+
+Write-Host "Conectado a Microsoft Graph" -ForegroundColor Green
+
+# ==============================
+# IMPORTAR CSV
+# ==============================
+
+$Empleados = Import-Csv $CsvPath
+
+# ==============================
+# PROCESAR EMPLEADOS
+# ==============================
+
+foreach ($emp in $Empleados) {
+
+    $DisplayName = "$($emp.Nombre) $($emp.Apellido)"
+    $UPN = ($emp.Nombre.Substring(0,1) + $emp.Apellido).ToLower() + "@$Domain"
+    $NuevoPuesto = $emp.Puesto
+
+    Write-Host "---------------------------------------------"
+    Write-Host "Procesando $DisplayName" -ForegroundColor Cyan
+
+    # ==============================
+    # OBTENER USUARIO
+    # ==============================
+
+    $User = Get-MgUser `
+        -Filter "userPrincipalName eq '$UPN'" `
+        -Property Id,JobTitle `
+        -ConsistencyLevel eventual `
+        -CountVariable count `
+        -ErrorAction SilentlyContinue
+
+    if (-not $User) {
+        Write-Host "Usuario no encontrado, se omite" -ForegroundColor Yellow
+        continue
+    }
+
+    $PuestoActual = $User.JobTitle
+
+    # ==============================
+    # DETECTAR CAMBIO DE PUESTO
+    # ==============================
+
+    if ($PuestoActual -ne $NuevoPuesto) {
+
+        Write-Host "Cambio de puesto detectado" -ForegroundColor Green
+        Write-Host "   Antes : $PuestoActual"
+        Write-Host "   Ahora : $NuevoPuesto"
+
+        # ==============================
+        # ACTUALIZAR JobTitle
+        # ==============================
+
+        Update-MgUser -UserId $User.Id -JobTitle $NuevoPuesto
+
+        # ==============================
+        # QUITAR DEL GRUPO ANTERIOR
+        # ==============================
+
+        if ($PuestoActual) {
+
+            $GrupoAnteriorNombre = "Rol-$PuestoActual"
+
+            $GrupoAnterior = Get-MgGroup `
+                -Filter "displayName eq '$GrupoAnteriorNombre'" `
+                -ConsistencyLevel eventual `
+                -CountVariable count `
+                -ErrorAction SilentlyContinue
+
+            if ($GrupoAnterior) {
+                Write-Host "Quitando del grupo $GrupoAnteriorNombre"
+                Remove-MgGroupMemberByRef `
+                    -GroupId $GrupoAnterior.Id `
+                    -DirectoryObjectId $User.Id `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+
+        # ==============================
+        # CREAR / OBTENER NUEVO GRUPO
+        # ==============================
+
+        $GrupoNuevoNombre = "Rol-$NuevoPuesto"
+
+        $GrupoNuevo = Get-MgGroup `
+            -Filter "displayName eq '$GrupoNuevoNombre'" `
+            -ConsistencyLevel eventual `
+            -CountVariable count `
+            -ErrorAction SilentlyContinue
+
+        if (-not $GrupoNuevo) {
+
+            Write-Host "Grupo no existe. Creando: $GrupoNuevoNombre" -ForegroundColor Yellow
+
+            New-MgGroup `
+                -DisplayName $GrupoNuevoNombre `
+                -MailEnabled:$false `
+                -SecurityEnabled:$true `
+                -MailNickname ($GrupoNuevoNombre -replace ' ', '') `
+                -GroupTypes @()
+
+            # Esperar hasta que Graph lo indexe
+            do {
+                Start-Sleep -Seconds 3
+                $GrupoNuevo = Get-MgGroup `
+                    -Filter "displayName eq '$GrupoNuevoNombre'" `
+                    -ConsistencyLevel eventual `
+                    -CountVariable count `
+                    -ErrorAction SilentlyContinue
+            } until ($GrupoNuevo)
+        }
+
+        # ==============================
+        # AGREGAR USUARIO AL NUEVO GRUPO
+        # ==============================
+
+        $Body = @{
+            "@odata.id" = "https://graph.microsoft.com/v1.0/users/$($User.Id)"
+        }
+
+        Write-Host "Asignando a $GrupoNuevoNombre" -ForegroundColor Green
+
+        New-MgGroupMemberByRef `
+            -GroupId $GrupoNuevo.Id `
+            -BodyParameter $Body
+    }
+    else {
+        Write-Host "Sin cambios de puesto" -ForegroundColor Gray
+    }
+}
+
+Write-Host "Gestión de cambios finalizada" -ForegroundColor Green
