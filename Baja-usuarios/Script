@@ -1,1 +1,110 @@
+# ==========================================================
+# BAJA DE USUARIOS 
+# ==========================================================
 
+$TenantId     = "c5a14a3a-7ebd-4df6-9f5b-52b41846ce2d"
+$ClientId     = "d7e15bad-17f4-4c13-bf3d-b0014d34e044"
+$ClientSecret = "3kV8Q~CjU1q-h_gYDl23~MjmmwSkHA9KzCCvZa8U"
+$DominioUPN   = "monicavaleriasaraviagmail.onmicrosoft.com"
+
+$CsvPath = "C:\temp\NX\Desafio.csv"
+$LogPath = "C:\temp\NX\bajas.log"
+
+# ----------------------------------------------------------
+
+function Write-Log {
+    param (
+        [string]$Mensaje,
+        [string]$Nivel = "INFO"
+    )
+    $Linea = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Nivel] $Mensaje"
+    Add-Content -Path $LogPath -Value $Linea
+    Write-Host $Linea
+}
+
+function Normalize-Text {
+    param ([string]$Text)
+
+    if (-not $Text) { return "" }
+
+    $Text = $Text.ToLower().Trim()
+    $Text = $Text -replace '\s+', ''
+
+    $Text = $Text `
+        -replace '[áàäâ]', 'a' `
+        -replace '[éèëê]', 'e' `
+        -replace '[íìïî]', 'i' `
+        -replace '[óòöô]', 'o' `
+        -replace '[úùüû]', 'u' `
+        -replace 'ñ', 'n'
+
+    return $Text
+}
+
+# ----------------------------------------------------------
+# CONEXIÓN GRAPH
+# ----------------------------------------------------------
+
+$SecureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+$Credential   = New-Object System.Management.Automation.PSCredential($ClientId, $SecureSecret)
+
+Connect-MgGraph -TenantId $TenantId -ClientSecretCredential $Credential | Out-Null
+Write-Log "Conectado a Microsoft Graph"
+
+# ----------------------------------------------------------
+# CSV
+# ----------------------------------------------------------
+
+$CsvUsuarios = Import-Csv $CsvPath
+
+$IdentidadesCsv = $CsvUsuarios | ForEach-Object {
+    Normalize-Text "$($_.Nombre)$($_.Apellido)"
+}
+
+# ----------------------------------------------------------
+# USUARIOS ACTIVOS EN ENTRA ID
+# ----------------------------------------------------------
+
+$UsuariosActivos = Get-MgUser -All -Property Id,DisplayName,AccountEnabled |
+    Where-Object { $_.AccountEnabled -eq $true }
+
+# ----------------------------------------------------------
+# BAJAS
+# ----------------------------------------------------------
+
+foreach ($Usuario in $UsuariosActivos) {
+
+    if (-not $Usuario.DisplayName) { continue }
+
+    $ClaveEntra = Normalize-Text $Usuario.DisplayName
+
+    if ($IdentidadesCsv -notcontains $ClaveEntra) {
+
+        Write-Log "BAJA detectada: $($Usuario.DisplayName)" "WARN"
+
+        # Deshabilitar
+        Update-MgUser -UserId $Usuario.Id -AccountEnabled:$false
+        Write-Log "Cuenta deshabilitada"
+
+        # Revocar sesiones
+        Revoke-MgUserSignInSession -UserId $Usuario.Id
+        Write-Log "Sesiones revocadas"
+
+        # Quitar grupos Rol-*
+        $Grupos = Get-MgUserMemberOf -UserId $Usuario.Id -All | Where-Object {
+            $_.AdditionalProperties.displayName -like "Rol-*"
+        }
+
+        foreach ($Grupo in $Grupos) {
+            Remove-MgGroupMemberByRef `
+                -GroupId $Grupo.Id `
+                -DirectoryObjectId $Usuario.Id
+
+            Write-Log "Quitado del grupo $($Grupo.AdditionalProperties.displayName)"
+        }
+
+        Write-Log "BAJA COMPLETA: $($Usuario.DisplayName)" "WARN"
+    }
+}
+
+Write-Log "Proceso de bajas finalizado"
